@@ -1,0 +1,10 @@
+langchain-community
+langchain-text-splitters
+langchain-chroma
+chromadb
+python-dotenv
+pypdf
+gradio
+requests
+beautifulsoup4
+sentence-transformers
