@@ -29,5 +29,10 @@ llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
 chain = prompt | llm | StrOutputParser()
 st.title("Query Answering App")
 
+if input := st.text_input("Enter your query:"):
+    response = chain.invoke({"query": input})
+    st.write("Answer:", response)
+
+
 
 
