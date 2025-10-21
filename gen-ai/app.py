@@ -26,7 +26,10 @@ prompt=ChatPromptTemplate.from_messages([
 
 #OpenApi LLM
 llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0)
-chain = prompt | llm | StrOutputParser()
+output_parser = StrOutputParser()
+chain = prompt | llm | output_parser
+
+
 st.title("Query Answering App")
 
 if input := st.text_input("Enter your query:"):
