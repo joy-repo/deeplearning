@@ -11,10 +11,14 @@ import os
 import re
 import time
 import random
+import logging
 from requests.auth import HTTPBasicAuth
 
 from dotenv import load_dotenv
 load_dotenv()
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 DATA_PATH = r"data"
 CHROMA_PATH = r"chroma_db"
@@ -58,7 +62,10 @@ class LLMStudioEmbeddingsWrapper:
             "input": processed,
             "model": "embedding-model"  # This is required for OpenAI compatibility
         }
+        logging.info(f"Sending embedding request to {self.endpoint} with {len(processed)} texts")
         resp = self.session.post(self.endpoint, json=payload, timeout=30)
+        logging.info(f"LM Studio response: {resp.status_code} - {resp.reason}")
+        
         resp.raise_for_status()
         data = resp.json()
 
@@ -85,7 +92,7 @@ def get_embeddings_model():
 def get_vector_store():
     embeddings_model = get_embeddings_model()
     return Chroma(
-        collection_name="example_collection",
+        collection_name="llm_studio_collection",  # Different name for 768-dim embeddings
         embedding_function=embeddings_model,
         persist_directory=CHROMA_PATH,
     )
@@ -192,7 +199,7 @@ def add_documents_with_retries(vector_store, docs, ids, batch_size=64, max_retri
                 if attempt > max_retries:
                     print(f"Failed after {max_retries} attempts; last error: {e}")
                     raise
-                backoff = (2 ** attempt) + random.random()
+                backoff = (5 ** attempt) + random.random()
                 print(f"Transient error, retrying in {backoff:.1f}s (attempt {attempt}/{max_retries}): {e}")
                 time.sleep(backoff)
 
