@@ -24,18 +24,7 @@ DATA_PATH = r"data"
 CHROMA_PATH = r"chroma_db"
 
 class LLMStudioEmbeddingsWrapper:
-    """Wrapper that calls an LLM‑Studio (or similar) HTTP embedding endpoint.
 
-    Expects an endpoint that accepts POST {"input": [..texts..], "model": "embedding-model"}
-    and returns JSON in OpenAI format: {"data": [{"embedding": [...]}, ...]}
-    
-    The endpoint and API key are configurable via environment variables:
-      - LLM_STUDIO_EMBED_URL (default: http://127.0.0.1:1234/v1/embeddings)
-      - LLM_STUDIO_API_KEY
-
-    This object implements embed_documents and embed_query to be compatible
-    with Chroma/langchain embedding interfaces.
-    """
 
     def __init__(self, endpoint: str | None = None, api_key: str | None = None):
         self.endpoint = endpoint or os.getenv("LLM_STUDIO_EMBED_URL", "http://127.0.0.1:1234/v1/embeddings")

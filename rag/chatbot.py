@@ -7,14 +7,7 @@ import requests
 
 # Local SBERT wrapper (returns lists of floats compatible with Chroma)
 class LLMStudioEmbeddingsWrapper:
-    """Wrapper to call a local/remote LLM-Studio embeddings endpoint.
-
-    Uses env vars:
-      - LLM_STUDIO_EMBED_URL (default: http://127.0.0.1:8080/embed)
-      - LLM_STUDIO_API_KEY
-
-    Implements embed_documents and embed_query to be compatible with Chroma.
-    """
+    
 
     def __init__(self, endpoint: str | None = None, api_key: str | None = None):
         import os, requests
