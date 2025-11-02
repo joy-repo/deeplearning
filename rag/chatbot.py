@@ -1,7 +1,8 @@
-from transformers import pipeline
 from langchain_chroma import Chroma
 import gradio as gr
 from typing import List
+import os
+import requests
 
 
 # Local SBERT wrapper (returns lists of floats compatible with Chroma)
@@ -40,7 +41,11 @@ class LLMStudioEmbeddingsWrapper:
             "input": processed,
             "model": "embedding-model"  # Required for OpenAI compatibility
         }
+        print(f"DEBUG: Sending request to {self.endpoint}")
+        print(f"DEBUG: Payload: {payload}")
         resp = self.session.post(self.endpoint, json=payload, timeout=30)
+        print(f"DEBUG: Response status: {resp.status_code}")
+        print(f"DEBUG: Response text: {resp.text}")
         resp.raise_for_status()
         data = resp.json()
         
@@ -70,10 +75,39 @@ CHROMA_PATH = r"chroma_db"
 # Get vector store with embeddings configured
 from ingest_database import get_vector_store
 
-# initiate a local text-generation / text2text model (no OpenAI)
-# Using Flan-T5 small as a lightweight instruction-following model; change
-# to a different local HF model if you prefer.
-llm = pipeline("text2text-generation", model="google/flan-t5-small", device=-1)
+# LM Studio chat completion wrapper
+class LMStudioChatWrapper:
+    def __init__(self, endpoint: str | None = None, api_key: str | None = None):
+        self.endpoint = endpoint or os.getenv("LLM_STUDIO_CHAT_URL", "http://127.0.0.1:1234/v1/chat/completions")
+        self.api_key = api_key or os.getenv("LLM_STUDIO_API_KEY")
+        self.session = requests.Session()
+        if self.api_key:
+            self.session.headers.update({"Authorization": f"Bearer {self.api_key}"})
+        self.session.headers.update({"Content-Type": "application/json"})
+    
+    def generate(self, prompt: str, max_tokens: int = 512):
+        payload = {
+            "model": "local-model",
+            "messages": [
+                {"role": "user", "content": prompt}
+            ],
+            "max_tokens": max_tokens,
+            "temperature": 0.7,
+            "stream": False
+        }
+        
+        try:
+            resp = self.session.post(self.endpoint, json=payload, timeout=60)
+            resp.raise_for_status()
+            data = resp.json()
+            return data["choices"][0]["message"]["content"]
+        except Exception as e:
+            print(f"LM Studio chat error: {e}")
+            # Fallback to a simple response
+            return f"I apologize, but I'm having trouble connecting to the chat service. Error: {str(e)}"
+
+# Initialize LM Studio chat wrapper
+llm = LMStudioChatWrapper()
 
 # connect to the chromadb using our configured vector store
 vector_store = get_vector_store()
@@ -116,13 +150,15 @@ The knowledge: {knowledge}
 
         # print(rag_prompt)
 
-        # generate the response locally and yield it in small chunks to
-        # approximate streaming behavior
-        full = llm(rag_prompt, max_length=512)[0]["generated_text"]
-        # yield in 200-char chunks
-        for i in range(0, len(full), 200):
-            partial_message += full[i:i+200]
-            yield partial_message
+        try:
+            # generate the response using LM Studio chat completions
+            full = llm.generate(rag_prompt, max_tokens=512)
+            # yield in 200-char chunks to approximate streaming behavior
+            for i in range(0, len(full), 200):
+                partial_message += full[i:i+200]
+                yield partial_message
+        except Exception as e:
+            yield f"Error generating response: {str(e)}"
 
 # initiate the Gradio app
 chatbot = gr.ChatInterface(stream_response, textbox=gr.Textbox(placeholder="Send to the LLM...",
