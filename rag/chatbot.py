@@ -1,14 +1,28 @@
 from transformers import pipeline
 from langchain_chroma import Chroma
-from sentence_transformers import SentenceTransformer
 import gradio as gr
 from typing import List
 
 
 # Local SBERT wrapper (returns lists of floats compatible with Chroma)
-class SBERTEmbeddingsWrapper:
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
-        self.model = SentenceTransformer(model_name)
+class LLMStudioEmbeddingsWrapper:
+    """Wrapper to call a local/remote LLM-Studio embeddings endpoint.
+
+    Uses env vars:
+      - LLM_STUDIO_EMBED_URL (default: http://127.0.0.1:8080/embed)
+      - LLM_STUDIO_API_KEY
+
+    Implements embed_documents and embed_query to be compatible with Chroma.
+    """
+
+    def __init__(self, endpoint: str | None = None, api_key: str | None = None):
+        import os, requests
+        self.endpoint = endpoint or os.getenv("LLM_STUDIO_EMBED_URL", "http://127.0.0.1:1234/v1/embeddings")
+        self.api_key = api_key or os.getenv("LLM_STUDIO_API_KEY")
+        self.session = requests.Session()
+        if self.api_key:
+            self.session.headers.update({"Authorization": f"Bearer {self.api_key}"})
+        self.session.headers.update({"Content-Type": "application/json"})
 
     def _to_texts(self, texts: List[str]):
         processed = []
@@ -21,12 +35,29 @@ class SBERTEmbeddingsWrapper:
 
     def embed_documents(self, texts: List[str]):
         processed = self._to_texts(texts)
-        embeddings = self.model.encode(processed, show_progress_bar=False)
-        return [emb.tolist() if hasattr(emb, "tolist") else emb for emb in embeddings]
+        # Use OpenAI-compatible format
+        payload = {
+            "input": processed,
+            "model": "embedding-model"  # Required for OpenAI compatibility
+        }
+        resp = self.session.post(self.endpoint, json=payload, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        
+        # OpenAI format response: {"data": [{"embedding": [...]}, ...]}
+        if isinstance(data, dict) and "data" in data:
+            return [item.get("embedding") for item in data["data"]]
+        
+        # Fallback for other formats
+        if isinstance(data, dict) and "embeddings" in data:
+            return data["embeddings"]
+        if isinstance(data, list):
+            return data
+        
+        raise ValueError("Unexpected response from embedding endpoint: %r" % data)
 
     def embed_query(self, text: str):
-        emb = self.model.encode([text])
-        return emb[0].tolist()
+        return self.embed_documents([text])[0]
 
 # import the .env file
 from dotenv import load_dotenv
@@ -36,19 +67,16 @@ load_dotenv()
 DATA_PATH = r"data"
 CHROMA_PATH = r"chroma_db"
 
-embeddings_model = SBERTEmbeddingsWrapper()
+# Get vector store with embeddings configured
+from ingest_database import get_vector_store
 
 # initiate a local text-generation / text2text model (no OpenAI)
 # Using Flan-T5 small as a lightweight instruction-following model; change
 # to a different local HF model if you prefer.
 llm = pipeline("text2text-generation", model="google/flan-t5-small", device=-1)
 
-# connect to the chromadb
-vector_store = Chroma(
-    collection_name="example_collection",
-    embedding_function=embeddings_model,
-    persist_directory=CHROMA_PATH, 
-)
+# connect to the chromadb using our configured vector store
+vector_store = get_vector_store()
 
 # Set up the vectorstore to be the retriever
 num_results = 5

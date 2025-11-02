@@ -1,6 +1,5 @@
 from langchain_community.document_loaders import PyPDFDirectoryLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from sentence_transformers import SentenceTransformer
 from langchain_chroma import Chroma
 from uuid import uuid4
 from pathlib import Path
@@ -20,9 +19,28 @@ load_dotenv()
 DATA_PATH = r"data"
 CHROMA_PATH = r"chroma_db"
 
-class SBERTEmbeddingsWrapper:
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
-        self.model = SentenceTransformer(model_name)
+class LLMStudioEmbeddingsWrapper:
+    """Wrapper that calls an LLM‑Studio (or similar) HTTP embedding endpoint.
+
+    Expects an endpoint that accepts POST {"input": [..texts..], "model": "embedding-model"}
+    and returns JSON in OpenAI format: {"data": [{"embedding": [...]}, ...]}
+    
+    The endpoint and API key are configurable via environment variables:
+      - LLM_STUDIO_EMBED_URL (default: http://127.0.0.1:1234/v1/embeddings)
+      - LLM_STUDIO_API_KEY
+
+    This object implements embed_documents and embed_query to be compatible
+    with Chroma/langchain embedding interfaces.
+    """
+
+    def __init__(self, endpoint: str | None = None, api_key: str | None = None):
+        self.endpoint = endpoint or os.getenv("LLM_STUDIO_EMBED_URL", "http://127.0.0.1:1234/v1/embeddings")
+        self.api_key = api_key or os.getenv("LLM_STUDIO_API_KEY")
+        self.session = requests.Session()
+        # attach API key if present
+        if self.api_key:
+            self.session.headers.update({"Authorization": f"Bearer {self.api_key}"})
+        self.session.headers.update({"Content-Type": "application/json"})
 
     def _to_texts(self, texts):
         processed = []
@@ -35,21 +53,42 @@ class SBERTEmbeddingsWrapper:
 
     def embed_documents(self, texts):
         processed = self._to_texts(texts)
-        embeddings = self.model.encode(processed, show_progress_bar=False)
-        return [emb.tolist() if hasattr(emb, "tolist") else emb for emb in embeddings]
+        # Use OpenAI-compatible format
+        payload = {
+            "input": processed,
+            "model": "embedding-model"  # This is required for OpenAI compatibility
+        }
+        resp = self.session.post(self.endpoint, json=payload, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+
+        # OpenAI format response: {"data": [{"embedding": [...]}, ...]}
+        if isinstance(data, dict) and "data" in data:
+            return [item.get("embedding") for item in data["data"]]
+        
+        # Fallback for other formats
+        if isinstance(data, dict) and "embeddings" in data:
+            return data["embeddings"]
+        if isinstance(data, list):
+            return data
+
+        raise ValueError("Unexpected response from embedding endpoint: %r" % data)
 
     def embed_query(self, text: str):
-        emb = self.model.encode([text])
-        return emb[0].tolist()
+        result = self.embed_documents([text])
+        return result[0]
 
 
-embeddings_model = SBERTEmbeddingsWrapper()
+def get_embeddings_model():
+    return LLMStudioEmbeddingsWrapper()
 
-vector_store = Chroma(
-    collection_name="example_collection",
-    embedding_function=embeddings_model,
-    persist_directory=CHROMA_PATH,
-)
+def get_vector_store():
+    embeddings_model = get_embeddings_model()
+    return Chroma(
+        collection_name="example_collection",
+        embedding_function=embeddings_model,
+        persist_directory=CHROMA_PATH,
+    )
 
 def fetch_url_text(url: str) -> str:
     """Fetch the main text of `url` and return as plain text.
@@ -158,5 +197,7 @@ def add_documents_with_retries(vector_store, docs, ids, batch_size=64, max_retri
                 time.sleep(backoff)
 
 
-add_documents_with_retries(vector_store, chunks, uuids, batch_size=64, max_retries=5)
-print("completed ingesting documents.")
+if __name__ == "__main__":
+    vector_store = get_vector_store()
+    add_documents_with_retries(vector_store, chunks, uuids, batch_size=64, max_retries=5)
+    print("completed ingesting documents.")
