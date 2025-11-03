@@ -70,10 +70,26 @@ CHROMA_PATH = r"chroma_db"
 # Get vector store with embeddings configured
 from ingest_database import get_vector_store
 
-# initiate a local text-generation / text2text model (no OpenAI)
-# Using Flan-T5 small as a lightweight instruction-following model; change
-# to a different local HF model if you prefer.
-llm = pipeline("text2text-generation", model="google/flan-t5-small", device=-1)
+# Setup LM Studio client for chat completions
+import requests
+import json
+
+def call_llm_studio(prompt):
+    url = "http://127.0.0.1:1234/v1/chat/completions"
+    headers = {"Content-Type": "application/json"}
+    data = {
+        "messages": [
+            {"role": "system", "content": "You are a helpful assistant that answers questions based on the provided knowledge. Only use the information in the knowledge section to answer questions. If the knowledge doesn't contain relevant information, say so."},
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.7,
+        "max_tokens": 500,
+        "stream": False
+    }
+    
+    response = requests.post(url, headers=headers, json=data)
+    response.raise_for_status()
+    return response.json()
 
 # connect to the chromadb using our configured vector store
 vector_store = get_vector_store()
@@ -84,45 +100,37 @@ retriever = vector_store.as_retriever(search_kwargs={'k': num_results})
 
 # call this function for every message added to the chatbot
 def stream_response(message, history):
-    #print(f"Input: {message}. History: {history}\n")
-
     # retrieve the relevant chunks based on the question asked
     docs = retriever.invoke(message)
 
     # add all the chunks to 'knowledge'
     knowledge = ""
-
     for doc in docs:
-        knowledge += doc.page_content+"\n\n"
+        knowledge += doc.page_content + "\n\n"
 
+    # Create the full prompt with the RAG context
+    rag_prompt = f"""Use the following knowledge to answer the question. If the knowledge doesn't contain relevant information, say so clearly.
 
-    # make the call to the LLM (including prompt)
+Question: {message}
+
+Knowledge:
+{knowledge}
+
+Answer the question based only on the provided knowledge."""
+
+    # make the call to LM Studio
     if message is not None:
-        partial_message = ""
-
-        rag_prompt = f"""
-You are an assistant which answers questions based on knowledge which is provided to you.
-While answering, you don't use your internal knowledge,
-but solely the information in the "The knowledge" section.
-You don't mention anything to the user about the provided knowledge.
-
-The question: {message}
-
-Conversation history: {history}
-
-The knowledge: {knowledge}
-
-"""
-
-        # print(rag_prompt)
-
-        # generate the response locally and yield it in small chunks to
-        # approximate streaming behavior
-        full = llm(rag_prompt, max_length=512)[0]["generated_text"]
-        # yield in 200-char chunks
-        for i in range(0, len(full), 200):
-            partial_message += full[i:i+200]
-            yield partial_message
+        try:
+            response = call_llm_studio(rag_prompt)
+            # Extract just the content from the LM Studio response
+            content = response['choices'][0]['message']['content']
+            # Stream the content in chunks
+            partial_message = ""
+            for i in range(0, len(content), 200):
+                partial_message += content[i:i+200]
+                yield partial_message
+        except Exception as e:
+            yield f"Error: Failed to get response from LM Studio. Make sure the server is running. Error: {str(e)}"
 
 # initiate the Gradio app
 chatbot = gr.ChatInterface(stream_response, textbox=gr.Textbox(placeholder="Send to the LLM...",
