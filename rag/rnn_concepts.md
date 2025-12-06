@@ -20,6 +20,30 @@ At each time step $t$:
 2.  **Process**: It calculates the new hidden state $h_t$.
 3.  **Output**: It (optionally) produces an output $y_t$.
 
+## Deep RNNs (Stacked RNNs)
+You can stack multiple RNN layers on top of each other to learn more complex patterns.
+**Crucial Concept**: The data flows **up** and **forward** simultaneously.
+
+*   Layer 1 processes $x_t$ and passes its hidden state $h^{(1)}_t$ **immediately** to Layer 2.
+*   Layer 2 uses $h^{(1)}_t$ as its "input" for that same time step $t$.
+
+It does **NOT** wait for Layer 1 to finish the whole sequence.
+
+```mermaid
+graph TD
+    subgraph Time Step t
+        X[Input x_t] --> L1[Layer 1]
+        L1 --> L2[Layer 2]
+        L2 --> O[Output y_t]
+    end
+    subgraph Time Step t+1
+        X2[Input x_t+1] --> L1_next[Layer 1]
+        L1_next --> L2_next[Layer 2]
+    end
+    L1 -- h_t --> L1_next
+    L2 -- h_t --> L2_next
+```
+
 ## The Math (Simplified)
 $$ h_t = \tanh(W_h h_{t-1} + W_x x_t + b) $$
 
