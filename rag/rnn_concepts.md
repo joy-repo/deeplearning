@@ -44,6 +44,33 @@ graph TD
     L2 -- h_t --> L2_next
 ```
 
+## Trace Example: "I am the Best"
+Let's look at exactly what happens at every millisecond for a **2-Layer RNN**.
+
+### Time Step 1: Input "I"
+1.  **Layer 1** receives "I" and its empty memory (hidden state $h^{(1)}_0$).
+    *   It calculates **$h^{(1)}_1$** (Layer 1's memory of "I").
+2.  **Layer 2** **IMMEDIATELY** receives **$h^{(1)}_1$**.
+    *   It does *not* receive "I" directly, it receives Layer 1's interpretation of "I".
+    *   It calculates **$h^{(2)}_1$**.
+3.  **Network Output**: "am" (prediction).
+
+### Time Step 2: Input "am"
+1.  **Layer 1** receives "am" AND its previous memory **$h^{(1)}_1$**.
+    *   It combines "am" + "I" (from memory) -> New memory **$h^{(1)}_2$**.
+2.  **Layer 2** receives **$h^{(1)}_2$** AND its previous memory **$h^{(2)}_1$**.
+    *   It calculates **$h^{(2)}_2$**.
+
+### Summary Table
+| Time Step | Input | Layer 1 Output (fed to L2) | Layer 2 Input Sources |
+| :--- | :--- | :--- | :--- |
+| **t=1** | "I" | Memory of "I" | Memory of "I" (from L1) + Empty State |
+| **t=2** | "am" | Memory of "I" + "am" | Memory of ("I"+"am") (from L1) + Memory of ("I") (from L2 prev step) |
+| **t=3** | "the" | Memory of "I"+"am"+"the" | Memory of ("I"+"am"+"the") (from L1) + Memory of ("I"+"am") (from L2 prev step) |
+
+Notice how Layer 2 always works on the *current* output of Layer 1.
+
+
 ## The Math (Simplified)
 $$ h_t = \tanh(W_h h_{t-1} + W_x x_t + b) $$
 
